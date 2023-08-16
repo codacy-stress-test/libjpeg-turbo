@@ -1,3 +1,18 @@
+3.0.1
+=====
+
+### Significant changes relative to 3.0.0:
+
+1. The x86-64 SIMD functions now use a standard stack frame, prologue, and
+epilogue so that debuggers and profilers can reliably capture backtraces from
+within the functions.
+
+2. Fixed two minor issues in the interblock smoothing algorithm that caused
+mathematical (but not necessarily perceptible) edge block errors when
+decompressing progressive JPEG images exactly two MCU blocks in width or that
+use vertical chrominance subsampling.
+
+
 3.0.0
 =====
 
