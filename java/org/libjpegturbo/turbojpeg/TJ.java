@@ -581,7 +581,7 @@ public final class TJ {
    * transformation]
    *
    * <p>Setting this parameter will cause the decompression and transform
-   * functions to return an error if the number of scans in a progressive JPEG
+   * operations to throw an error if the number of scans in a progressive JPEG
    * image exceeds the specified limit.  The primary purpose of this is to
    * allow security-critical applications to guard against an exploit of the
    * progressive JPEG format described in
@@ -590,7 +590,7 @@ public final class TJ {
    * <p><b>Value</b>
    * <ul>
    * <li> maximum number of progressive JPEG scans that the decompression and
-   * transform functions will process <i>[default: <code>0</code> (no
+   * transform operations will process <i>[default: <code>0</code> (no
    * limit)]</i>
    * </ul>
    *
@@ -787,6 +787,21 @@ public final class TJ {
    * </ul>
    */
   public static final int PARAM_MAXMEMORY = 23;
+  /**
+   * Image size limit [decompression, lossless transformation]
+   *
+   * <p>Setting this parameter will cause the decompression and transform
+   * operations to throw an error if the number of pixels in the JPEG source
+   * image exceeds the specified limit.  This allows security-critical
+   * applications to guard against excessive memory consumption.
+   *
+   * <p><b>Value</b>
+   * <ul>
+   * <li> maximum number of pixels that the decompression and transform
+   * operations will process <i>[default: <code>0</code> (no limit)]</i>
+   * </ul>
+   */
+  public static final int PARAM_MAXPIXELS = 24;
 
 
   /**

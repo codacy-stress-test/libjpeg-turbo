@@ -109,9 +109,6 @@ typedef struct _tjinstance {
   char errStr[JMSG_LENGTH_MAX];
   boolean isInstanceError;
   /* Parameters */
-#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
-  int maxPixels;
-#endif
   boolean bottomUp;
   boolean noRealloc;
   int quality;
@@ -137,6 +134,7 @@ typedef struct _tjinstance {
   tjscalingfactor scalingFactor;
   tjregion croppingRegion;
   int maxMemory;
+  int maxPixels;
 } tjinstance;
 
 static tjhandle _tjInitCompress(tjinstance *this);
@@ -592,11 +590,6 @@ DLLEXPORT int tj3Set(tjhandle handle, int param, int value)
   GET_TJINSTANCE(handle, -1);
 
   switch (param) {
-#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
-  case TJPARAM_MAXPIXELS:
-    SET_PARAM(maxPixels, 0, -1);
-    break;
-#endif
   case TJPARAM_STOPONWARNING:
     SET_BOOL_PARAM(jerr.stopOnWarning);
     break;
@@ -709,6 +702,9 @@ DLLEXPORT int tj3Set(tjhandle handle, int param, int value)
   case TJPARAM_MAXMEMORY:
     SET_PARAM(maxMemory, 0, (int)(min(LONG_MAX / 1048576L, (long)INT_MAX)));
     break;
+  case TJPARAM_MAXPIXELS:
+    SET_PARAM(maxPixels, 0, -1);
+    break;
   default:
     THROW("Invalid parameter");
   }
@@ -773,6 +769,8 @@ DLLEXPORT int tj3Get(tjhandle handle, int param)
     return this->densityUnits;
   case TJPARAM_MAXMEMORY:
     return this->maxMemory;
+  case TJPARAM_MAXPIXELS:
+    return this->maxPixels;
   }
 
   return -1;
@@ -2051,7 +2049,7 @@ static void setDecodeDefaults(tjinstance *this, int pixelFormat)
         jpeg_alloc_quant_table((j_common_ptr)&this->dinfo);
   }
 
-  this->cinfo.mem->max_memory_to_use = (long)this->maxMemory * 1048576L;
+  this->dinfo.mem->max_memory_to_use = (long)this->maxMemory * 1048576L;
 }
 
 
@@ -2345,11 +2343,14 @@ DLLEXPORT int tj3DecompressToYUVPlanes8(tjhandle handle,
     retval = -1;  goto bailout;
   }
 
-  if (dinfo->global_state <= DSTATE_START) {
+  if (dinfo->global_state <= DSTATE_INHEADER) {
     jpeg_mem_src_tj(dinfo, jpegBuf, jpegSize);
     jpeg_read_header(dinfo, TRUE);
   }
   setDecompParameters(this);
+  if (this->maxPixels &&
+      (unsigned long long)this->jpegWidth * this->jpegHeight > this->maxPixels)
+    THROW("Image is too large");
   if (this->subsamp == TJSAMP_UNKNOWN)
     THROW("Could not determine subsampling level of JPEG image");
 
@@ -2536,7 +2537,7 @@ DLLEXPORT int tj3DecompressToYUV8(tjhandle handle,
     retval = -1;  goto bailout;
   }
 
-  if (dinfo->global_state <= DSTATE_START) {
+  if (dinfo->global_state <= DSTATE_INHEADER) {
     jpeg_mem_src_tj(dinfo, jpegBuf, jpegSize);
     jpeg_read_header(dinfo, TRUE);
   }
@@ -2683,10 +2684,12 @@ DLLEXPORT int tj3Transform(tjhandle handle, const unsigned char *jpegBuf,
     retval = -1;  goto bailout;
   }
 
-  if (dinfo->global_state <= DSTATE_START)
+  if (dinfo->global_state <= DSTATE_INHEADER)
     jpeg_mem_src_tj(dinfo, jpegBuf, jpegSize);
 
   for (i = 0; i < n; i++) {
+    if (t[i].op < 0 || t[i].op >= TJ_NUMXOP)
+      THROW("Invalid transform operation");
     xinfo[i].transform = xformtypes[t[i].op];
     xinfo[i].perfect = (t[i].options & TJXOPT_PERFECT) ? 1 : 0;
     xinfo[i].trim = (t[i].options & TJXOPT_TRIM) ? 1 : 0;
@@ -2711,8 +2714,12 @@ DLLEXPORT int tj3Transform(tjhandle handle, const unsigned char *jpegBuf,
   }
 
   jcopy_markers_setup(dinfo, saveMarkers ? JCOPYOPT_ALL : JCOPYOPT_NONE);
-  if (dinfo->global_state <= DSTATE_START)
+  if (dinfo->global_state <= DSTATE_INHEADER)
     jpeg_read_header(dinfo, TRUE);
+  if (this->maxPixels &&
+      (unsigned long long)dinfo->image_width * dinfo->image_height >
+      this->maxPixels)
+    THROW("Image is too large");
   this->subsamp = getSubsamp(&this->dinfo);
 
   for (i = 0; i < n; i++) {
