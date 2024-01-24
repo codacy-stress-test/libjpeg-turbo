@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 2.8.12)
+cmake_minimum_required(VERSION 2.8.12...3.28)
 # When using CMake 3.4 and later, don't export symbols from executables unless
 # the CMAKE_ENABLE_EXPORTS variable is set.
 if(POLICY CMP0065)
@@ -11,7 +11,7 @@ endif()
 
 project(libjpeg-turbo C)
 set(VERSION 3.0.2)
-set(COPYRIGHT_YEAR "1991-2023")
+set(COPYRIGHT_YEAR "1991-2024")
 string(REPLACE "." ";" VERSION_TRIPLET ${VERSION})
 list(GET VERSION_TRIPLET 0 VERSION_MAJOR)
 list(GET VERSION_TRIPLET 1 VERSION_MINOR)
@@ -710,6 +710,9 @@ if(WITH_TURBOJPEG)
 
     add_executable(tjexample tjexample.c)
     target_link_libraries(tjexample turbojpeg)
+
+    add_custom_target(tjdoc COMMAND doxygen -s doxygen.config
+      WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   endif()
 
   if(ENABLE_STATIC)
