@@ -1,5 +1,5 @@
 /*
- * Copyright (C)2021-2023 D. R. Commander.  All Rights Reserved.
+ * Copyright (C)2021-2024 D. R. Commander.  All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -39,13 +39,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
   size_t dstSizes[1] = { 0 }, maxBufSize;
   int width = 0, height = 0, jpegSubsamp, i;
   tjtransform transforms[1];
-#if defined(__has_feature) && __has_feature(memory_sanitizer)
-  char env[18] = "JSIMD_FORCENONE=1";
-
-  /* The libjpeg-turbo SIMD extensions produce false positives with
-     MemorySanitizer. */
-  putenv(env);
-#endif
 
   if ((handle = tj3Init(TJINIT_TRANSFORM)) == NULL)
     goto bailout;
@@ -77,7 +70,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
   transforms[0].op = TJXOP_NONE;
   transforms[0].options = TJXOPT_PROGRESSIVE | TJXOPT_COPYNONE;
   dstBufs[0] =
-    (unsigned char *)malloc(tj3JPEGBufSize(width, height, jpegSubsamp));
+    (unsigned char *)tj3Alloc(tj3JPEGBufSize(width, height, jpegSubsamp));
   if (!dstBufs[0])
     goto bailout;
 
@@ -108,8 +101,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
   transforms[0].options = TJXOPT_GRAY | TJXOPT_CROP | TJXOPT_COPYNONE |
                           TJXOPT_OPTIMIZE;
   dstBufs[0] =
-    (unsigned char *)malloc(tj3JPEGBufSize((height + 1) / 2, (width + 1) / 2,
-                                           jpegSubsamp));
+    (unsigned char *)tj3Alloc(tj3JPEGBufSize((height + 1) / 2, (width + 1) / 2,
+                                             jpegSubsamp));
   if (!dstBufs[0])
     goto bailout;
 
@@ -132,7 +125,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
   transforms[0].op = TJXOP_ROT90;
   transforms[0].options = TJXOPT_TRIM | TJXOPT_ARITHMETIC;
   dstBufs[0] =
-    (unsigned char *)malloc(tj3JPEGBufSize(height, width, jpegSubsamp));
+    (unsigned char *)tj3Alloc(tj3JPEGBufSize(height, width, jpegSubsamp));
   if (!dstBufs[0])
     goto bailout;
 
