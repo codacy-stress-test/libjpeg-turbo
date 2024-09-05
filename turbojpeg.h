@@ -188,16 +188,32 @@ enum TJSAMP {
    * The JPEG image uses an unusual type of chrominance subsampling.  Such
    * images can be decompressed into packed-pixel images, but they cannot be
    * - decompressed into planar YUV images,
-   * - losslessly transformed if #TJXOPT_CROP is specified, or
+   * - losslessly transformed if #TJXOPT_CROP is specified and #TJXOPT_GRAY is
+   * not specified, or
    * - partially decompressed using a cropping region.
    */
   TJSAMP_UNKNOWN = -1
 };
 
 /**
- * MCU block width (in pixels) for a given level of chrominance subsampling
+ * iMCU width (in pixels) for a given level of chrominance subsampling
  *
- * MCU block sizes:
+ * In a typical lossy JPEG image, 8x8 blocks of DCT coefficients for each
+ * component are interleaved in a single scan.  If the image uses chrominance
+ * subsampling, then multiple luminance blocks are stored together, followed by
+ * a single block for each chrominance component.  The minimum set of
+ * full-resolution luminance block(s) and corresponding (possibly subsampled)
+ * chrominance blocks necessary to represent at least one DCT block per
+ * component is called a "Minimum Coded Unit" or "MCU".  (For example, an MCU
+ * in an interleaved lossy JPEG image that uses 4:2:2 subsampling consists of
+ * two luminance blocks followed by one block for each chrominance component.)
+ * In a non-interleaved lossy JPEG image, each component is stored in a
+ * separate scan, and an MCU is a single DCT block, so we use the term "iMCU"
+ * (interleaved MCU) to refer to the equivalent of an MCU in an interleaved
+ * JPEG image.  For the common case of interleaved JPEG images, an iMCU is the
+ * same as an MCU.
+ *
+ * iMCU sizes:
  * - 8x8 for no subsampling or grayscale
  * - 16x8 for 4:2:2
  * - 8x16 for 4:4:0
@@ -208,9 +224,24 @@ enum TJSAMP {
 static const int tjMCUWidth[TJ_NUMSAMP]  = { 8, 16, 16, 8, 8, 32, 8 };
 
 /**
- * MCU block height (in pixels) for a given level of chrominance subsampling
+ * iMCU height (in pixels) for a given level of chrominance subsampling
  *
- * MCU block sizes:
+ * In a typical lossy JPEG image, 8x8 blocks of DCT coefficients for each
+ * component are interleaved in a single scan.  If the image uses chrominance
+ * subsampling, then multiple luminance blocks are stored together, followed by
+ * a single block for each chrominance component.  The minimum set of
+ * full-resolution luminance block(s) and corresponding (possibly subsampled)
+ * chrominance blocks necessary to represent at least one DCT block per
+ * component is called a "Minimum Coded Unit" or "MCU".  (For example, an MCU
+ * in an interleaved lossy JPEG image that uses 4:2:2 subsampling consists of
+ * two luminance blocks followed by one block for each chrominance component.)
+ * In a non-interleaved lossy JPEG image, each component is stored in a
+ * separate scan, and an MCU is a single DCT block, so we use the term "iMCU"
+ * (interleaved MCU) to refer to the equivalent of an MCU in an interleaved
+ * JPEG image.  For the common case of interleaved JPEG images, an iMCU is the
+ * same as an MCU.
+ *
+ * iMCU sizes:
  * - 8x8 for no subsampling or grayscale
  * - 16x8 for 4:2:2
  * - 8x16 for 4:4:0
@@ -620,8 +651,8 @@ enum TJPARAM {
    * and refined with subsequent higher-quality scans containing
    * higher-frequency DCT coefficients.  When using Huffman entropy coding, the
    * progressive JPEG format also provides an "end-of-bands (EOB) run" feature
-   * that allows large groups of zeroes, potentially spanning multiple MCU
-   * blocks, to be represented using only a few bytes.
+   * that allows large groups of zeroes, potentially spanning multiple MCUs,
+   * to be represented using only a few bytes.
    *
    * **Value**
    * - `0` *[default for compression, lossless transformation]* The lossy JPEG
@@ -752,8 +783,7 @@ enum TJPARAM {
    */
   TJPARAM_LOSSLESSPT,
   /**
-   * JPEG restart marker interval in MCU blocks (lossy) or samples (lossless)
-   * [compression only]
+   * JPEG restart marker interval in MCUs [lossy compression only]
    *
    * The nature of entropy coding is such that a corrupt JPEG image cannot
    * be decompressed beyond the point of corruption unless it contains restart
@@ -763,22 +793,30 @@ enum TJPARAM {
    * tolerance of the JPEG image, but adding too many restart markers can
    * adversely affect the compression ratio and performance.
    *
+   * In typical JPEG images, an MCU (Minimum Coded Unit) is the minimum set of
+   * interleaved "data units" (8x8 DCT blocks if the image is lossy or samples
+   * if the image is lossless) necessary to represent at least one data unit
+   * per component.  (For example, an MCU in an interleaved lossy JPEG image
+   * that uses 4:2:2 subsampling consists of two luminance blocks followed by
+   * one block for each chrominance component.)  In single-component or
+   * non-interleaved JPEG images, an MCU is the same as a data unit.
+   *
    * **Value**
-   * - the number of MCU blocks or samples between each restart marker
-   * *[default: `0` (no restart markers)]*
+   * - the number of MCUs between each restart marker *[default: `0` (no
+   * restart markers)]*
    *
    * Setting this parameter to a non-zero value sets #TJPARAM_RESTARTROWS to 0.
    */
   TJPARAM_RESTARTBLOCKS,
   /**
-   * JPEG restart marker interval in MCU rows (lossy) or sample rows (lossless)
-   * [compression only]
+   * JPEG restart marker interval in MCU rows [compression only]
    *
-   * See #TJPARAM_RESTARTBLOCKS for a description of restart markers.
+   * See #TJPARAM_RESTARTBLOCKS for a description of restart markers and MCUs.
+   * An MCU row is a row of MCUs spanning the entire width of the image.
    *
    * **Value**
-   * - the number of MCU rows or sample rows between each restart marker
-   * *[default: `0` (no restart markers)]*
+   * - the number of MCU rows between each restart marker *[default: `0` (no
+   * restart markers)]*
    *
    * Setting this parameter to a non-zero value sets #TJPARAM_RESTARTBLOCKS to
    * 0.
@@ -902,12 +940,12 @@ enum TJXOP {
   TJXOP_NONE,
   /**
    * Flip (mirror) image horizontally.  This transform is imperfect if there
-   * are any partial MCU blocks on the right edge (see #TJXOPT_PERFECT.)
+   * are any partial iMCUs on the right edge (see #TJXOPT_PERFECT.)
    */
   TJXOP_HFLIP,
   /**
    * Flip (mirror) image vertically.  This transform is imperfect if there are
-   * any partial MCU blocks on the bottom edge (see #TJXOPT_PERFECT.)
+   * any partial iMCUs on the bottom edge (see #TJXOPT_PERFECT.)
    */
   TJXOP_VFLIP,
   /**
@@ -917,25 +955,23 @@ enum TJXOP {
   TJXOP_TRANSPOSE,
   /**
    * Transverse transpose image (flip/mirror along upper right to lower left
-   * axis.)  This transform is imperfect if there are any partial MCU blocks in
-   * the image (see #TJXOPT_PERFECT.)
+   * axis.)  This transform is imperfect if there are any partial iMCUs in the
+   * image (see #TJXOPT_PERFECT.)
    */
   TJXOP_TRANSVERSE,
   /**
    * Rotate image clockwise by 90 degrees.  This transform is imperfect if
-   * there are any partial MCU blocks on the bottom edge (see
-   * #TJXOPT_PERFECT.)
+   * there are any partial iMCUs on the bottom edge (see #TJXOPT_PERFECT.)
    */
   TJXOP_ROT90,
   /**
    * Rotate image 180 degrees.  This transform is imperfect if there are any
-   * partial MCU blocks in the image (see #TJXOPT_PERFECT.)
+   * partial iMCUs in the image (see #TJXOPT_PERFECT.)
    */
   TJXOP_ROT180,
   /**
    * Rotate image counter-clockwise by 90 degrees.  This transform is imperfect
-   * if there are any partial MCU blocks on the right edge (see
-   * #TJXOPT_PERFECT.)
+   * if there are any partial iMCUs on the right edge (see #TJXOPT_PERFECT.)
    */
   TJXOP_ROT270
 };
@@ -943,19 +979,19 @@ enum TJXOP {
 
 /**
  * This option causes #tj3Transform() to return an error if the transform is
- * not perfect.  Lossless transforms operate on MCU blocks, the size of which
+ * not perfect.  Lossless transforms operate on iMCUs, the size of which
  * depends on the level of chrominance subsampling used (see #tjMCUWidth and
  * #tjMCUHeight.)  If the image's width or height is not evenly divisible by
- * the MCU block size, then there will be partial MCU blocks on the right
- * and/or bottom edges.  It is not possible to move these partial MCU blocks to
- * the top or left of the image, so any transform that would require that is
- * "imperfect."  If this option is not specified, then any partial MCU blocks
- * that cannot be transformed will be left in place, which will create
- * odd-looking strips on the right or bottom edge of the image.
+ * the iMCU size, then there will be partial iMCUs on the right and/or bottom
+ * edges.  It is not possible to move these partial iMCUs to the top or left of
+ * the image, so any transform that would require that is "imperfect."  If this
+ * option is not specified, then any partial iMCUs that cannot be transformed
+ * will be left in place, which will create odd-looking strips on the right or
+ * bottom edge of the image.
  */
 #define TJXOPT_PERFECT  (1 << 0)
 /**
- * Discard any partial MCU blocks that cannot be transformed.
+ * Discard any partial iMCUs that cannot be transformed.
  */
 #define TJXOPT_TRIM  (1 << 1)
 /**
@@ -984,7 +1020,7 @@ enum TJXOP {
  */
 #define TJXOPT_PROGRESSIVE  (1 << 5)
 /**
- * Do not copy any extra markers (including EXIF and ICC profile data) from the
+ * Do not copy any extra markers (including Exif and ICC profile data) from the
  * source image to the destination image.
  */
 #define TJXOPT_COPYNONE  (1 << 6)
@@ -1021,13 +1057,16 @@ typedef struct {
  */
 typedef struct {
   /**
-   * The left boundary of the cropping region.  This must be evenly divisible
-   * by the MCU block width (see #tjMCUWidth.)
+   * The left boundary of the cropping region.  For lossless transformation,
+   * this must be evenly divisible by the iMCU width (see #tjMCUWidth) of the
+   * destination image.  For decompression, this must be evenly divisible by
+   * the scaled iMCU width of the source image.
    */
   int x;
   /**
    * The upper boundary of the cropping region.  For lossless transformation,
-   * this must be evenly divisible by the MCU block height (see #tjMCUHeight.)
+   * this must be evenly divisible by the iMCU height (see #tjMCUHeight) of the
+   * destination image.
    */
   int y;
   /**
@@ -1146,6 +1185,40 @@ DLLEXPORT tjhandle tj3Init(int initType);
 
 
 /**
+ * Destroy a TurboJPEG instance.
+ *
+ * @param handle handle to a TurboJPEG instance.  If the handle is NULL, then
+ * this function has no effect.
+ */
+DLLEXPORT void tj3Destroy(tjhandle handle);
+
+
+/**
+ * Returns a descriptive error message explaining why the last command failed.
+ *
+ * @param handle handle to a TurboJPEG instance, or NULL if the error was
+ * generated by a global function (but note that retrieving the error message
+ * for a global function is thread-safe only on platforms that support
+ * thread-local storage.)
+ *
+ * @return a descriptive error message explaining why the last command failed.
+ */
+DLLEXPORT char *tj3GetErrorStr(tjhandle handle);
+
+
+/**
+ * Returns a code indicating the severity of the last error.  See
+ * @ref TJERR "Error codes".
+ *
+ * @param handle handle to a TurboJPEG instance
+ *
+ * @return a code indicating the severity of the last error.  See
+ * @ref TJERR "Error codes".
+ */
+DLLEXPORT int tj3GetErrorCode(tjhandle handle);
+
+
+/**
  * Set the value of a parameter.
  *
  * @param handle handle to a TurboJPEG instance
@@ -1173,204 +1246,33 @@ DLLEXPORT int tj3Get(tjhandle handle, int param);
 
 
 /**
- * Compress an 8-bit-per-sample packed-pixel RGB, grayscale, or CMYK image into
- * an 8-bit-per-sample JPEG image.
+ * Allocate a byte buffer for use with TurboJPEG.  You should always use this
+ * function to allocate the JPEG destination buffer(s) for the compression and
+ * transform functions unless you are disabling automatic buffer (re)allocation
+ * (by setting #TJPARAM_NOREALLOC.)
  *
- * @param handle handle to a TurboJPEG instance that has been initialized for
- * compression
+ * @param bytes the number of bytes to allocate
  *
- * @param srcBuf pointer to a buffer containing a packed-pixel RGB, grayscale,
- * or CMYK source image to be compressed.  This buffer should normally be
- * `pitch * height` samples in size.  However, you can also use this parameter
- * to compress from a specific region of a larger buffer.
+ * @return a pointer to a newly-allocated buffer with the specified number of
+ * bytes.
  *
- * @param width width (in pixels) of the source image
- *
- * @param pitch samples per row in the source image.  Normally this should be
- * <tt>width * #tjPixelSize[pixelFormat]</tt>, if the image is unpadded.
- * (Setting this parameter to 0 is the equivalent of setting it to
- * <tt>width * #tjPixelSize[pixelFormat]</tt>.)  However, you can also use this
- * parameter to specify the row alignment/padding of the source image, to skip
- * rows, or to compress from a specific region of a larger buffer.
- *
- * @param height height (in pixels) of the source image
- *
- * @param pixelFormat pixel format of the source image (see @ref TJPF
- * "Pixel formats".)
- *
- * @param jpegBuf address of a pointer to a byte buffer that will receive the
- * JPEG image.  TurboJPEG has the ability to reallocate the JPEG buffer to
- * accommodate the size of the JPEG image.  Thus, you can choose to:
- * -# pre-allocate the JPEG buffer with an arbitrary size using #tj3Alloc() and
- * let TurboJPEG grow the buffer as needed,
- * -# set `*jpegBuf` to NULL to tell TurboJPEG to allocate the buffer for you,
- * or
- * -# pre-allocate the buffer to a "worst case" size determined by calling
- * #tj3JPEGBufSize().  This should ensure that the buffer never has to be
- * re-allocated.  (Setting #TJPARAM_NOREALLOC guarantees that it won't be.)
- * .
- * If you choose option 1, then `*jpegSize` should be set to the size of your
- * pre-allocated buffer.  In any case, unless you have set #TJPARAM_NOREALLOC,
- * you should always check `*jpegBuf` upon return from this function, as it may
- * have changed.
- *
- * @param jpegSize pointer to a size_t variable that holds the size of the JPEG
- * buffer.  If `*jpegBuf` points to a pre-allocated buffer, then `*jpegSize`
- * should be set to the size of the buffer.  Upon return, `*jpegSize` will
- * contain the size of the JPEG image (in bytes.)  If `*jpegBuf` points to a
- * JPEG buffer that is being reused from a previous call to one of the JPEG
- * compression functions, then `*jpegSize` is ignored.
- *
- * @return 0 if successful, or -1 if an error occurred (see #tj3GetErrorStr()
- * and #tj3GetErrorCode().)
+ * @see tj3Free()
  */
-DLLEXPORT int tj3Compress8(tjhandle handle, const unsigned char *srcBuf,
-                           int width, int pitch, int height, int pixelFormat,
-                           unsigned char **jpegBuf, size_t *jpegSize);
-
-/**
- * Compress a 12-bit-per-sample packed-pixel RGB, grayscale, or CMYK image into
- * a 12-bit-per-sample JPEG image.
- *
- * \details \copydetails tj3Compress8()
- */
-DLLEXPORT int tj3Compress12(tjhandle handle, const short *srcBuf, int width,
-                            int pitch, int height, int pixelFormat,
-                            unsigned char **jpegBuf, size_t *jpegSize);
-
-/**
- * Compress a 16-bit-per-sample packed-pixel RGB, grayscale, or CMYK image into
- * a 16-bit-per-sample lossless JPEG image.
- *
- * \details \copydetails tj3Compress8()
- */
-DLLEXPORT int tj3Compress16(tjhandle handle, const unsigned short *srcBuf,
-                            int width, int pitch, int height, int pixelFormat,
-                            unsigned char **jpegBuf, size_t *jpegSize);
+DLLEXPORT void *tj3Alloc(size_t bytes);
 
 
 /**
- * Compress an 8-bit-per-sample unified planar YUV image into an
- * 8-bit-per-sample JPEG image.
+ * Free a byte buffer previously allocated by TurboJPEG.  You should always use
+ * this function to free JPEG destination buffer(s) that were automatically
+ * (re)allocated by the compression and transform functions or that were
+ * manually allocated using #tj3Alloc().
  *
- * @param handle handle to a TurboJPEG instance that has been initialized for
- * compression
+ * @param buffer address of the buffer to free.  If the address is NULL, then
+ * this function has no effect.
  *
- * @param srcBuf pointer to a buffer containing a unified planar YUV source
- * image to be compressed.  The size of this buffer should match the value
- * returned by #tj3YUVBufSize() for the given image width, height, row
- * alignment, and level of chrominance subsampling (see #TJPARAM_SUBSAMP.)  The
- * Y, U (Cb), and V (Cr) image planes should be stored sequentially in the
- * buffer.  (Refer to @ref YUVnotes "YUV Image Format Notes".)
- *
- * @param width width (in pixels) of the source image.  If the width is not an
- * even multiple of the MCU block width (see #tjMCUWidth), then an intermediate
- * buffer copy will be performed.
- *
- * @param align row alignment (in bytes) of the source image (must be a power
- * of 2.)  Setting this parameter to n indicates that each row in each plane of
- * the source image is padded to the nearest multiple of n bytes
- * (1 = unpadded.)
- *
- * @param height height (in pixels) of the source image.  If the height is not
- * an even multiple of the MCU block height (see #tjMCUHeight), then an
- * intermediate buffer copy will be performed.
- *
- * @param jpegBuf address of a pointer to a byte buffer that will receive the
- * JPEG image.  TurboJPEG has the ability to reallocate the JPEG buffer to
- * accommodate the size of the JPEG image.  Thus, you can choose to:
- * -# pre-allocate the JPEG buffer with an arbitrary size using #tj3Alloc() and
- * let TurboJPEG grow the buffer as needed,
- * -# set `*jpegBuf` to NULL to tell TurboJPEG to allocate the buffer for you,
- * or
- * -# pre-allocate the buffer to a "worst case" size determined by calling
- * #tj3JPEGBufSize().  This should ensure that the buffer never has to be
- * re-allocated.  (Setting #TJPARAM_NOREALLOC guarantees that it won't be.)
- * .
- * If you choose option 1, then `*jpegSize` should be set to the size of your
- * pre-allocated buffer.  In any case, unless you have set #TJPARAM_NOREALLOC,
- * you should always check `*jpegBuf` upon return from this function, as it may
- * have changed.
- *
- * @param jpegSize pointer to a size_t variable that holds the size of the JPEG
- * buffer.  If `*jpegBuf` points to a pre-allocated buffer, then `*jpegSize`
- * should be set to the size of the buffer.  Upon return, `*jpegSize` will
- * contain the size of the JPEG image (in bytes.)  If `*jpegBuf` points to a
- * JPEG buffer that is being reused from a previous call to one of the JPEG
- * compression functions, then `*jpegSize` is ignored.
- *
- * @return 0 if successful, or -1 if an error occurred (see #tj3GetErrorStr()
- * and #tj3GetErrorCode().)
+ * @see tj3Alloc()
  */
-DLLEXPORT int tj3CompressFromYUV8(tjhandle handle,
-                                  const unsigned char *srcBuf, int width,
-                                  int align, int height,
-                                  unsigned char **jpegBuf, size_t *jpegSize);
-
-
-/**
- * Compress a set of 8-bit-per-sample Y, U (Cb), and V (Cr) image planes into
- * an 8-bit-per-sample JPEG image.
- *
- * @param handle handle to a TurboJPEG instance that has been initialized for
- * compression
- *
- * @param srcPlanes an array of pointers to Y, U (Cb), and V (Cr) image planes
- * (or just a Y plane, if compressing a grayscale image) that contain a YUV
- * source image to be compressed.  These planes can be contiguous or
- * non-contiguous in memory.  The size of each plane should match the value
- * returned by #tj3YUVPlaneSize() for the given image width, height, strides,
- * and level of chrominance subsampling (see #TJPARAM_SUBSAMP.)  Refer to
- * @ref YUVnotes "YUV Image Format Notes" for more details.
- *
- * @param width width (in pixels) of the source image.  If the width is not an
- * even multiple of the MCU block width (see #tjMCUWidth), then an intermediate
- * buffer copy will be performed.
- *
- * @param strides an array of integers, each specifying the number of bytes per
- * row in the corresponding plane of the YUV source image.  Setting the stride
- * for any plane to 0 is the same as setting it to the plane width (see
- * @ref YUVnotes "YUV Image Format Notes".)  If `strides` is NULL, then the
- * strides for all planes will be set to their respective plane widths.  You
- * can adjust the strides in order to specify an arbitrary amount of row
- * padding in each plane or to create a JPEG image from a subregion of a larger
- * planar YUV image.
- *
- * @param height height (in pixels) of the source image.  If the height is not
- * an even multiple of the MCU block height (see #tjMCUHeight), then an
- * intermediate buffer copy will be performed.
- *
- * @param jpegBuf address of a pointer to a byte buffer that will receive the
- * JPEG image.  TurboJPEG has the ability to reallocate the JPEG buffer to
- * accommodate the size of the JPEG image.  Thus, you can choose to:
- * -# pre-allocate the JPEG buffer with an arbitrary size using #tj3Alloc() and
- * let TurboJPEG grow the buffer as needed,
- * -# set `*jpegBuf` to NULL to tell TurboJPEG to allocate the buffer for you,
- * or
- * -# pre-allocate the buffer to a "worst case" size determined by calling
- * #tj3JPEGBufSize().  This should ensure that the buffer never has to be
- * re-allocated.  (Setting #TJPARAM_NOREALLOC guarantees that it won't be.)
- * .
- * If you choose option 1, then `*jpegSize` should be set to the size of your
- * pre-allocated buffer.  In any case, unless you have set #TJPARAM_NOREALLOC,
- * you should always check `*jpegBuf` upon return from this function, as it may
- * have changed.
- *
- * @param jpegSize pointer to a size_t variable that holds the size of the JPEG
- * buffer.  If `*jpegBuf` points to a pre-allocated buffer, then `*jpegSize`
- * should be set to the size of the buffer.  Upon return, `*jpegSize` will
- * contain the size of the JPEG image (in bytes.)  If `*jpegBuf` points to a
- * JPEG buffer that is being reused from a previous call to one of the JPEG
- * compression functions, then `*jpegSize` is ignored.
- *
- * @return 0 if successful, or -1 if an error occurred (see #tj3GetErrorStr()
- * and #tj3GetErrorCode().)
- */
-DLLEXPORT int tj3CompressFromYUVPlanes8(tjhandle handle,
-                                        const unsigned char * const *srcPlanes,
-                                        int width, const int *strides,
-                                        int height, unsigned char **jpegBuf,
-                                        size_t *jpegSize);
+DLLEXPORT void tj3Free(void *buffer);
 
 
 /**
@@ -1483,51 +1385,204 @@ DLLEXPORT int tj3YUVPlaneHeight(int componentID, int height, int subsamp);
 
 
 /**
- * Encode an 8-bit-per-sample packed-pixel RGB or grayscale image into an
- * 8-bit-per-sample unified planar YUV image.  This function performs color
- * conversion (which is accelerated in the libjpeg-turbo implementation) but
- * does not execute any of the other steps in the JPEG compression process.
+ * Compress an 8-bit-per-sample packed-pixel RGB, grayscale, or CMYK image into
+ * an 8-bit-per-sample JPEG image.
  *
  * @param handle handle to a TurboJPEG instance that has been initialized for
  * compression
  *
- * @param srcBuf pointer to a buffer containing a packed-pixel RGB or grayscale
- * source image to be encoded.  This buffer should normally be `pitch * height`
- * bytes in size.  However, you can also use this parameter to encode from a
- * specific region of a larger buffer.
+ * @param srcBuf pointer to a buffer containing a packed-pixel RGB, grayscale,
+ * or CMYK source image to be compressed.  This buffer should normally be
+ * `pitch * height` samples in size.  However, you can also use this parameter
+ * to compress from a specific region of a larger buffer.
  *
  * @param width width (in pixels) of the source image
  *
- * @param pitch bytes per row in the source image.  Normally this should be
+ * @param pitch samples per row in the source image.  Normally this should be
  * <tt>width * #tjPixelSize[pixelFormat]</tt>, if the image is unpadded.
  * (Setting this parameter to 0 is the equivalent of setting it to
  * <tt>width * #tjPixelSize[pixelFormat]</tt>.)  However, you can also use this
  * parameter to specify the row alignment/padding of the source image, to skip
- * rows, or to encode from a specific region of a larger packed-pixel image.
+ * rows, or to compress from a specific region of a larger buffer.
  *
  * @param height height (in pixels) of the source image
  *
  * @param pixelFormat pixel format of the source image (see @ref TJPF
  * "Pixel formats".)
  *
- * @param dstBuf pointer to a buffer that will receive the unified planar YUV
- * image.  Use #tj3YUVBufSize() to determine the appropriate size for this
- * buffer based on the image width, height, row alignment, and level of
- * chrominance subsampling (see #TJPARAM_SUBSAMP.)  The Y, U (Cb), and V (Cr)
- * image planes will be stored sequentially in the buffer.  (Refer to
- * @ref YUVnotes "YUV Image Format Notes".)
+ * @param jpegBuf address of a pointer to a byte buffer that will receive the
+ * JPEG image.  TurboJPEG has the ability to reallocate the JPEG buffer to
+ * accommodate the size of the JPEG image.  Thus, you can choose to:
+ * -# pre-allocate the JPEG buffer with an arbitrary size using #tj3Alloc() and
+ * let TurboJPEG grow the buffer as needed,
+ * -# set `*jpegBuf` to NULL to tell TurboJPEG to allocate the buffer for you,
+ * or
+ * -# pre-allocate the buffer to a "worst case" size determined by calling
+ * #tj3JPEGBufSize().  This should ensure that the buffer never has to be
+ * re-allocated.  (Setting #TJPARAM_NOREALLOC guarantees that it won't be.)
+ * .
+ * If you choose option 1, then `*jpegSize` should be set to the size of your
+ * pre-allocated buffer.  In any case, unless you have set #TJPARAM_NOREALLOC,
+ * you should always check `*jpegBuf` upon return from this function, as it may
+ * have changed.
  *
- * @param align row alignment (in bytes) of the YUV image (must be a power of
- * 2.)  Setting this parameter to n will cause each row in each plane of the
- * YUV image to be padded to the nearest multiple of n bytes (1 = unpadded.)
- * To generate images suitable for X Video, `align` should be set to 4.
+ * @param jpegSize pointer to a size_t variable that holds the size of the JPEG
+ * buffer.  If `*jpegBuf` points to a pre-allocated buffer, then `*jpegSize`
+ * should be set to the size of the buffer.  Upon return, `*jpegSize` will
+ * contain the size of the JPEG image (in bytes.)  If `*jpegBuf` points to a
+ * JPEG buffer that is being reused from a previous call to one of the JPEG
+ * compression functions, then `*jpegSize` is ignored.
  *
  * @return 0 if successful, or -1 if an error occurred (see #tj3GetErrorStr()
  * and #tj3GetErrorCode().)
  */
-DLLEXPORT int tj3EncodeYUV8(tjhandle handle, const unsigned char *srcBuf,
+DLLEXPORT int tj3Compress8(tjhandle handle, const unsigned char *srcBuf,
+                           int width, int pitch, int height, int pixelFormat,
+                           unsigned char **jpegBuf, size_t *jpegSize);
+
+/**
+ * Compress a 12-bit-per-sample packed-pixel RGB, grayscale, or CMYK image into
+ * a 12-bit-per-sample JPEG image.
+ *
+ * \details \copydetails tj3Compress8()
+ */
+DLLEXPORT int tj3Compress12(tjhandle handle, const short *srcBuf, int width,
+                            int pitch, int height, int pixelFormat,
+                            unsigned char **jpegBuf, size_t *jpegSize);
+
+/**
+ * Compress a 16-bit-per-sample packed-pixel RGB, grayscale, or CMYK image into
+ * a 16-bit-per-sample lossless JPEG image.
+ *
+ * \details \copydetails tj3Compress8()
+ */
+DLLEXPORT int tj3Compress16(tjhandle handle, const unsigned short *srcBuf,
                             int width, int pitch, int height, int pixelFormat,
-                            unsigned char *dstBuf, int align);
+                            unsigned char **jpegBuf, size_t *jpegSize);
+
+
+/**
+ * Compress a set of 8-bit-per-sample Y, U (Cb), and V (Cr) image planes into
+ * an 8-bit-per-sample JPEG image.
+ *
+ * @param handle handle to a TurboJPEG instance that has been initialized for
+ * compression
+ *
+ * @param srcPlanes an array of pointers to Y, U (Cb), and V (Cr) image planes
+ * (or just a Y plane, if compressing a grayscale image) that contain a YUV
+ * source image to be compressed.  These planes can be contiguous or
+ * non-contiguous in memory.  The size of each plane should match the value
+ * returned by #tj3YUVPlaneSize() for the given image width, height, strides,
+ * and level of chrominance subsampling (see #TJPARAM_SUBSAMP.)  Refer to
+ * @ref YUVnotes "YUV Image Format Notes" for more details.
+ *
+ * @param width width (in pixels) of the source image.  If the width is not an
+ * even multiple of the iMCU width (see #tjMCUWidth), then an intermediate
+ * buffer copy will be performed.
+ *
+ * @param strides an array of integers, each specifying the number of bytes per
+ * row in the corresponding plane of the YUV source image.  Setting the stride
+ * for any plane to 0 is the same as setting it to the plane width (see
+ * @ref YUVnotes "YUV Image Format Notes".)  If `strides` is NULL, then the
+ * strides for all planes will be set to their respective plane widths.  You
+ * can adjust the strides in order to specify an arbitrary amount of row
+ * padding in each plane or to create a JPEG image from a subregion of a larger
+ * planar YUV image.
+ *
+ * @param height height (in pixels) of the source image.  If the height is not
+ * an even multiple of the iMCU height (see #tjMCUHeight), then an intermediate
+ * buffer copy will be performed.
+ *
+ * @param jpegBuf address of a pointer to a byte buffer that will receive the
+ * JPEG image.  TurboJPEG has the ability to reallocate the JPEG buffer to
+ * accommodate the size of the JPEG image.  Thus, you can choose to:
+ * -# pre-allocate the JPEG buffer with an arbitrary size using #tj3Alloc() and
+ * let TurboJPEG grow the buffer as needed,
+ * -# set `*jpegBuf` to NULL to tell TurboJPEG to allocate the buffer for you,
+ * or
+ * -# pre-allocate the buffer to a "worst case" size determined by calling
+ * #tj3JPEGBufSize().  This should ensure that the buffer never has to be
+ * re-allocated.  (Setting #TJPARAM_NOREALLOC guarantees that it won't be.)
+ * .
+ * If you choose option 1, then `*jpegSize` should be set to the size of your
+ * pre-allocated buffer.  In any case, unless you have set #TJPARAM_NOREALLOC,
+ * you should always check `*jpegBuf` upon return from this function, as it may
+ * have changed.
+ *
+ * @param jpegSize pointer to a size_t variable that holds the size of the JPEG
+ * buffer.  If `*jpegBuf` points to a pre-allocated buffer, then `*jpegSize`
+ * should be set to the size of the buffer.  Upon return, `*jpegSize` will
+ * contain the size of the JPEG image (in bytes.)  If `*jpegBuf` points to a
+ * JPEG buffer that is being reused from a previous call to one of the JPEG
+ * compression functions, then `*jpegSize` is ignored.
+ *
+ * @return 0 if successful, or -1 if an error occurred (see #tj3GetErrorStr()
+ * and #tj3GetErrorCode().)
+ */
+DLLEXPORT int tj3CompressFromYUVPlanes8(tjhandle handle,
+                                        const unsigned char * const *srcPlanes,
+                                        int width, const int *strides,
+                                        int height, unsigned char **jpegBuf,
+                                        size_t *jpegSize);
+
+
+/**
+ * Compress an 8-bit-per-sample unified planar YUV image into an
+ * 8-bit-per-sample JPEG image.
+ *
+ * @param handle handle to a TurboJPEG instance that has been initialized for
+ * compression
+ *
+ * @param srcBuf pointer to a buffer containing a unified planar YUV source
+ * image to be compressed.  The size of this buffer should match the value
+ * returned by #tj3YUVBufSize() for the given image width, height, row
+ * alignment, and level of chrominance subsampling (see #TJPARAM_SUBSAMP.)  The
+ * Y, U (Cb), and V (Cr) image planes should be stored sequentially in the
+ * buffer.  (Refer to @ref YUVnotes "YUV Image Format Notes".)
+ *
+ * @param width width (in pixels) of the source image.  If the width is not an
+ * even multiple of the iMCU width (see #tjMCUWidth), then an intermediate
+ * buffer copy will be performed.
+ *
+ * @param align row alignment (in bytes) of the source image (must be a power
+ * of 2.)  Setting this parameter to n indicates that each row in each plane of
+ * the source image is padded to the nearest multiple of n bytes
+ * (1 = unpadded.)
+ *
+ * @param height height (in pixels) of the source image.  If the height is not
+ * an even multiple of the iMCU height (see #tjMCUHeight), then an intermediate
+ * buffer copy will be performed.
+ *
+ * @param jpegBuf address of a pointer to a byte buffer that will receive the
+ * JPEG image.  TurboJPEG has the ability to reallocate the JPEG buffer to
+ * accommodate the size of the JPEG image.  Thus, you can choose to:
+ * -# pre-allocate the JPEG buffer with an arbitrary size using #tj3Alloc() and
+ * let TurboJPEG grow the buffer as needed,
+ * -# set `*jpegBuf` to NULL to tell TurboJPEG to allocate the buffer for you,
+ * or
+ * -# pre-allocate the buffer to a "worst case" size determined by calling
+ * #tj3JPEGBufSize().  This should ensure that the buffer never has to be
+ * re-allocated.  (Setting #TJPARAM_NOREALLOC guarantees that it won't be.)
+ * .
+ * If you choose option 1, then `*jpegSize` should be set to the size of your
+ * pre-allocated buffer.  In any case, unless you have set #TJPARAM_NOREALLOC,
+ * you should always check `*jpegBuf` upon return from this function, as it may
+ * have changed.
+ *
+ * @param jpegSize pointer to a size_t variable that holds the size of the JPEG
+ * buffer.  If `*jpegBuf` points to a pre-allocated buffer, then `*jpegSize`
+ * should be set to the size of the buffer.  Upon return, `*jpegSize` will
+ * contain the size of the JPEG image (in bytes.)  If `*jpegBuf` points to a
+ * JPEG buffer that is being reused from a previous call to one of the JPEG
+ * compression functions, then `*jpegSize` is ignored.
+ *
+ * @return 0 if successful, or -1 if an error occurred (see #tj3GetErrorStr()
+ * and #tj3GetErrorCode().)
+ */
+DLLEXPORT int tj3CompressFromYUV8(tjhandle handle,
+                                  const unsigned char *srcBuf, int width,
+                                  int align, int height,
+                                  unsigned char **jpegBuf, size_t *jpegSize);
 
 
 /**
@@ -1586,6 +1641,54 @@ DLLEXPORT int tj3EncodeYUVPlanes8(tjhandle handle, const unsigned char *srcBuf,
 
 
 /**
+ * Encode an 8-bit-per-sample packed-pixel RGB or grayscale image into an
+ * 8-bit-per-sample unified planar YUV image.  This function performs color
+ * conversion (which is accelerated in the libjpeg-turbo implementation) but
+ * does not execute any of the other steps in the JPEG compression process.
+ *
+ * @param handle handle to a TurboJPEG instance that has been initialized for
+ * compression
+ *
+ * @param srcBuf pointer to a buffer containing a packed-pixel RGB or grayscale
+ * source image to be encoded.  This buffer should normally be `pitch * height`
+ * bytes in size.  However, you can also use this parameter to encode from a
+ * specific region of a larger buffer.
+ *
+ * @param width width (in pixels) of the source image
+ *
+ * @param pitch bytes per row in the source image.  Normally this should be
+ * <tt>width * #tjPixelSize[pixelFormat]</tt>, if the image is unpadded.
+ * (Setting this parameter to 0 is the equivalent of setting it to
+ * <tt>width * #tjPixelSize[pixelFormat]</tt>.)  However, you can also use this
+ * parameter to specify the row alignment/padding of the source image, to skip
+ * rows, or to encode from a specific region of a larger packed-pixel image.
+ *
+ * @param height height (in pixels) of the source image
+ *
+ * @param pixelFormat pixel format of the source image (see @ref TJPF
+ * "Pixel formats".)
+ *
+ * @param dstBuf pointer to a buffer that will receive the unified planar YUV
+ * image.  Use #tj3YUVBufSize() to determine the appropriate size for this
+ * buffer based on the image width, height, row alignment, and level of
+ * chrominance subsampling (see #TJPARAM_SUBSAMP.)  The Y, U (Cb), and V (Cr)
+ * image planes will be stored sequentially in the buffer.  (Refer to
+ * @ref YUVnotes "YUV Image Format Notes".)
+ *
+ * @param align row alignment (in bytes) of the YUV image (must be a power of
+ * 2.)  Setting this parameter to n will cause each row in each plane of the
+ * YUV image to be padded to the nearest multiple of n bytes (1 = unpadded.)
+ * To generate images suitable for X Video, `align` should be set to 4.
+ *
+ * @return 0 if successful, or -1 if an error occurred (see #tj3GetErrorStr()
+ * and #tj3GetErrorCode().)
+ */
+DLLEXPORT int tj3EncodeYUV8(tjhandle handle, const unsigned char *srcBuf,
+                            int width, int pitch, int height, int pixelFormat,
+                            unsigned char *dstBuf, int align);
+
+
+/**
  * Retrieve information about a JPEG image without decompressing it, or prime
  * the decompressor with quantization and Huffman tables.  If a JPEG image is
  * passed to this function, then the @ref TJPARAM "parameters" that describe
@@ -1641,7 +1744,7 @@ DLLEXPORT tjscalingfactor *tj3GetScalingFactors(int *numScalingFactors);
  * #TJPARAM_JPEGHEIGHT) and the specified scaling factor.  When decompressing
  * into a planar YUV image, an intermediate buffer copy will be performed if
  * the width or height of the scaled destination image is not an even multiple
- * of the MCU block size (see #tjMCUWidth and #tjMCUHeight.)  Note that
+ * of the iMCU size (see #tjMCUWidth and #tjMCUHeight.)  Note that
  * decompression scaling is not available (and the specified scaling factor is
  * ignored) when decompressing lossless JPEG images (see #TJPARAM_LOSSLESS),
  * since the IDCT algorithm is not used with those images.  Note also that
@@ -1663,12 +1766,12 @@ DLLEXPORT int tj3SetScalingFactor(tjhandle handle,
  * @param croppingRegion #tjregion structure that specifies a subregion of the
  * JPEG image to decompress, or <tt>#TJUNCROPPED</tt> for no cropping.  The
  * left boundary of the cropping region must be evenly divisible by the scaled
- * MCU block width-- <tt>#TJSCALED(#tjMCUWidth[subsamp], scalingFactor)</tt>,
- * where `subsamp` is the level of chrominance subsampling in the JPEG image
- * (see #TJPARAM_SUBSAMP) and `scalingFactor` is the decompression scaling
- * factor (see #tj3SetScalingFactor().)  The cropping region should be
- * specified relative to the scaled image dimensions.  Unless `croppingRegion`
- * is <tt>#TJUNCROPPED</tt>, the JPEG header must be read (see
+ * iMCU width-- <tt>#TJSCALED(#tjMCUWidth[subsamp], scalingFactor)</tt>, where
+ * `subsamp` is the level of chrominance subsampling in the JPEG image (see
+ * #TJPARAM_SUBSAMP) and `scalingFactor` is the decompression scaling factor
+ * (see #tj3SetScalingFactor().)  The cropping region should be specified
+ * relative to the scaled image dimensions.  Unless `croppingRegion` is
+ * <tt>#TJUNCROPPED</tt>, the JPEG header must be read (see
  * #tj3DecompressHeader()) prior to calling this function.
  *
  * @return 0 if successful, or -1 if an error occurred (see #tj3GetErrorStr().)
@@ -1744,43 +1847,6 @@ DLLEXPORT int tj3Decompress16(tjhandle handle, const unsigned char *jpegBuf,
 
 
 /**
- * Decompress an 8-bit-per-sample JPEG image into an 8-bit-per-sample unified
- * planar YUV image.  This function performs JPEG decompression but leaves out
- * the color conversion step, so a planar YUV image is generated instead of a
- * packed-pixel image.  The @ref TJPARAM "parameters" that describe the JPEG
- * image will be set when this function returns.
- *
- * @param handle handle to a TurboJPEG instance that has been initialized for
- * decompression
- *
- * @param jpegBuf pointer to a byte buffer containing the JPEG image to
- * decompress
- *
- * @param jpegSize size of the JPEG image (in bytes)
- *
- * @param dstBuf pointer to a buffer that will receive the unified planar YUV
- * decompressed image.  Use #tj3YUVBufSize() to determine the appropriate size
- * for this buffer based on the scaled JPEG width and height (see #TJSCALED(),
- * #TJPARAM_JPEGWIDTH, #TJPARAM_JPEGHEIGHT, and #tj3SetScalingFactor()), row
- * alignment, and level of chrominance subsampling (see #TJPARAM_SUBSAMP.)  The
- * Y, U (Cb), and V (Cr) image planes will be stored sequentially in the
- * buffer.  (Refer to @ref YUVnotes "YUV Image Format Notes".)
- *
- * @param align row alignment (in bytes) of the YUV image (must be a power of
- * 2.)  Setting this parameter to n will cause each row in each plane of the
- * YUV image to be padded to the nearest multiple of n bytes (1 = unpadded.)
- * To generate images suitable for X Video, `align` should be set to 4.
- *
- * @return 0 if successful, or -1 if an error occurred (see #tj3GetErrorStr()
- * and #tj3GetErrorCode().)
- */
-DLLEXPORT int tj3DecompressToYUV8(tjhandle handle,
-                                  const unsigned char *jpegBuf,
-                                  size_t jpegSize,
-                                  unsigned char *dstBuf, int align);
-
-
-/**
  * Decompress an 8-bit-per-sample JPEG image into separate 8-bit-per-sample Y,
  * U (Cb), and V (Cr) image planes.  This function performs JPEG decompression
  * but leaves out the color conversion step, so a planar YUV image is generated
@@ -1824,52 +1890,40 @@ DLLEXPORT int tj3DecompressToYUVPlanes8(tjhandle handle,
 
 
 /**
- * Decode an 8-bit-per-sample unified planar YUV image into an 8-bit-per-sample
- * packed-pixel RGB or grayscale image.  This function performs color
- * conversion (which is accelerated in the libjpeg-turbo implementation) but
- * does not execute any of the other steps in the JPEG decompression process.
+ * Decompress an 8-bit-per-sample JPEG image into an 8-bit-per-sample unified
+ * planar YUV image.  This function performs JPEG decompression but leaves out
+ * the color conversion step, so a planar YUV image is generated instead of a
+ * packed-pixel image.  The @ref TJPARAM "parameters" that describe the JPEG
+ * image will be set when this function returns.
  *
  * @param handle handle to a TurboJPEG instance that has been initialized for
  * decompression
  *
- * @param srcBuf pointer to a buffer containing a unified planar YUV source
- * image to be decoded.  The size of this buffer should match the value
- * returned by #tj3YUVBufSize() for the given image width, height, row
+ * @param jpegBuf pointer to a byte buffer containing the JPEG image to
+ * decompress
+ *
+ * @param jpegSize size of the JPEG image (in bytes)
+ *
+ * @param dstBuf pointer to a buffer that will receive the unified planar YUV
+ * decompressed image.  Use #tj3YUVBufSize() to determine the appropriate size
+ * for this buffer based on the scaled JPEG width and height (see #TJSCALED(),
+ * #TJPARAM_JPEGWIDTH, #TJPARAM_JPEGHEIGHT, and #tj3SetScalingFactor()), row
  * alignment, and level of chrominance subsampling (see #TJPARAM_SUBSAMP.)  The
- * Y, U (Cb), and V (Cr) image planes should be stored sequentially in the
- * source buffer.  (Refer to @ref YUVnotes "YUV Image Format Notes".)
+ * Y, U (Cb), and V (Cr) image planes will be stored sequentially in the
+ * buffer.  (Refer to @ref YUVnotes "YUV Image Format Notes".)
  *
- * @param align row alignment (in bytes) of the YUV source image (must be a
- * power of 2.)  Setting this parameter to n indicates that each row in each
- * plane of the YUV source image is padded to the nearest multiple of n bytes
- * (1 = unpadded.)
- *
- * @param dstBuf pointer to a buffer that will receive the packed-pixel decoded
- * image.  This buffer should normally be `pitch * height` bytes in size.
- * However, you can also use this parameter to decode into a specific region of
- * a larger buffer.
- *
- * @param width width (in pixels) of the source and destination images
- *
- * @param pitch bytes per row in the destination image.  Normally this should
- * be set to <tt>width * #tjPixelSize[pixelFormat]</tt>, if the destination
- * image should be unpadded.  (Setting this parameter to 0 is the equivalent of
- * setting it to <tt>width * #tjPixelSize[pixelFormat]</tt>.)  However, you can
- * also use this parameter to specify the row alignment/padding of the
- * destination image, to skip rows, or to decode into a specific region of a
- * larger buffer.
- *
- * @param height height (in pixels) of the source and destination images
- *
- * @param pixelFormat pixel format of the destination image (see @ref TJPF
- * "Pixel formats".)
+ * @param align row alignment (in bytes) of the YUV image (must be a power of
+ * 2.)  Setting this parameter to n will cause each row in each plane of the
+ * YUV image to be padded to the nearest multiple of n bytes (1 = unpadded.)
+ * To generate images suitable for X Video, `align` should be set to 4.
  *
  * @return 0 if successful, or -1 if an error occurred (see #tj3GetErrorStr()
  * and #tj3GetErrorCode().)
  */
-DLLEXPORT int tj3DecodeYUV8(tjhandle handle, const unsigned char *srcBuf,
-                            int align, unsigned char *dstBuf, int width,
-                            int pitch, int height, int pixelFormat);
+DLLEXPORT int tj3DecompressToYUV8(tjhandle handle,
+                                  const unsigned char *jpegBuf,
+                                  size_t jpegSize,
+                                  unsigned char *dstBuf, int align);
 
 
 /**
@@ -1929,6 +1983,55 @@ DLLEXPORT int tj3DecodeYUVPlanes8(tjhandle handle,
 
 
 /**
+ * Decode an 8-bit-per-sample unified planar YUV image into an 8-bit-per-sample
+ * packed-pixel RGB or grayscale image.  This function performs color
+ * conversion (which is accelerated in the libjpeg-turbo implementation) but
+ * does not execute any of the other steps in the JPEG decompression process.
+ *
+ * @param handle handle to a TurboJPEG instance that has been initialized for
+ * decompression
+ *
+ * @param srcBuf pointer to a buffer containing a unified planar YUV source
+ * image to be decoded.  The size of this buffer should match the value
+ * returned by #tj3YUVBufSize() for the given image width, height, row
+ * alignment, and level of chrominance subsampling (see #TJPARAM_SUBSAMP.)  The
+ * Y, U (Cb), and V (Cr) image planes should be stored sequentially in the
+ * source buffer.  (Refer to @ref YUVnotes "YUV Image Format Notes".)
+ *
+ * @param align row alignment (in bytes) of the YUV source image (must be a
+ * power of 2.)  Setting this parameter to n indicates that each row in each
+ * plane of the YUV source image is padded to the nearest multiple of n bytes
+ * (1 = unpadded.)
+ *
+ * @param dstBuf pointer to a buffer that will receive the packed-pixel decoded
+ * image.  This buffer should normally be `pitch * height` bytes in size.
+ * However, you can also use this parameter to decode into a specific region of
+ * a larger buffer.
+ *
+ * @param width width (in pixels) of the source and destination images
+ *
+ * @param pitch bytes per row in the destination image.  Normally this should
+ * be set to <tt>width * #tjPixelSize[pixelFormat]</tt>, if the destination
+ * image should be unpadded.  (Setting this parameter to 0 is the equivalent of
+ * setting it to <tt>width * #tjPixelSize[pixelFormat]</tt>.)  However, you can
+ * also use this parameter to specify the row alignment/padding of the
+ * destination image, to skip rows, or to decode into a specific region of a
+ * larger buffer.
+ *
+ * @param height height (in pixels) of the source and destination images
+ *
+ * @param pixelFormat pixel format of the destination image (see @ref TJPF
+ * "Pixel formats".)
+ *
+ * @return 0 if successful, or -1 if an error occurred (see #tj3GetErrorStr()
+ * and #tj3GetErrorCode().)
+ */
+DLLEXPORT int tj3DecodeYUV8(tjhandle handle, const unsigned char *srcBuf,
+                            int align, unsigned char *dstBuf, int width,
+                            int pitch, int height, int pixelFormat);
+
+
+/**
  * Losslessly transform a JPEG image into another JPEG image.  Lossless
  * transforms work by moving the raw DCT coefficients from one JPEG image
  * structure to another without altering the values of the coefficients.  While
@@ -1966,7 +2069,7 @@ DLLEXPORT int tj3DecodeYUVPlanes8(tjhandle handle,
  * this should ensure that the buffer never has to be re-allocated.  (Setting
  * #TJPARAM_NOREALLOC guarantees that it won't be.)  Note, however, that there
  * are some rare cases (such as transforming images with a large amount of
- * embedded EXIF or ICC profile data) in which the transformed JPEG image will
+ * embedded Exif or ICC profile data) in which the transformed JPEG image will
  * be larger than the worst-case size, and #TJPARAM_NOREALLOC cannot be used in
  * those cases.
  * .
@@ -1991,31 +2094,6 @@ DLLEXPORT int tj3DecodeYUVPlanes8(tjhandle handle,
 DLLEXPORT int tj3Transform(tjhandle handle, const unsigned char *jpegBuf,
                            size_t jpegSize, int n, unsigned char **dstBufs,
                            size_t *dstSizes, const tjtransform *transforms);
-
-
-/**
- * Destroy a TurboJPEG instance.
- *
- * @param handle handle to a TurboJPEG instance.  If the handle is NULL, then
- * this function has no effect.
- */
-DLLEXPORT void tj3Destroy(tjhandle handle);
-
-
-/**
- * Allocate a byte buffer for use with TurboJPEG.  You should always use this
- * function to allocate the JPEG destination buffer(s) for the compression and
- * transform functions unless you are disabling automatic buffer (re)allocation
- * (by setting #TJPARAM_NOREALLOC.)
- *
- * @param bytes the number of bytes to allocate
- *
- * @return a pointer to a newly-allocated buffer with the specified number of
- * bytes.
- *
- * @see tj3Free()
- */
-DLLEXPORT void *tj3Alloc(size_t bytes);
 
 
 /**
@@ -2139,45 +2217,6 @@ DLLEXPORT int tj3SaveImage12(tjhandle handle, const char *filename,
 DLLEXPORT int tj3SaveImage16(tjhandle handle, const char *filename,
                              const unsigned short *buffer, int width,
                              int pitch, int height, int pixelFormat);
-
-
-/**
- * Free a byte buffer previously allocated by TurboJPEG.  You should always use
- * this function to free JPEG destination buffer(s) that were automatically
- * (re)allocated by the compression and transform functions or that were
- * manually allocated using #tj3Alloc().
- *
- * @param buffer address of the buffer to free.  If the address is NULL, then
- * this function has no effect.
- *
- * @see tj3Alloc()
- */
-DLLEXPORT void tj3Free(void *buffer);
-
-
-/**
- * Returns a descriptive error message explaining why the last command failed.
- *
- * @param handle handle to a TurboJPEG instance, or NULL if the error was
- * generated by a global function (but note that retrieving the error message
- * for a global function is thread-safe only on platforms that support
- * thread-local storage.)
- *
- * @return a descriptive error message explaining why the last command failed.
- */
-DLLEXPORT char *tj3GetErrorStr(tjhandle handle);
-
-
-/**
- * Returns a code indicating the severity of the last error.  See
- * @ref TJERR "Error codes".
- *
- * @param handle handle to a TurboJPEG instance
- *
- * @return a code indicating the severity of the last error.  See
- * @ref TJERR "Error codes".
- */
-DLLEXPORT int tj3GetErrorCode(tjhandle handle);
 
 
 /* Backward compatibility functions and macros (nothing to see here) */
